@@ -1,4 +1,6 @@
 var readlineSync = require("readline-sync")
+import { Database } from "bun:sqlite";
+
 
 // A simple immutable Todo list manager in TypeScript
 
@@ -19,6 +21,7 @@ class TodoManager {
     // outside. It should never be reassigned.
     private readonly todos: ReadonlyArray<Todo>;
     private nextId: number = 1;
+    private database: Database = new Database("todos.db");
 
     /**
      * The function `consolidateIds` takes an array of `Todo` objects and returns a new array with updated
@@ -166,6 +169,75 @@ class TodoManager {
         ];
         return { success: true, value: new TodoManager(newTodos) };
     }
+
+    toSqlite() : Result<Database, string> {
+        try {
+            // Start transaction for atomic operation
+            this.database.run("BEGIN");
+
+            // Create table if it doesn't exist
+            this.database.run("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY, title TEXT, description TEXT, completed BOOLEAN)");
+
+            // Clear existing data to prevent duplicates
+            this.database.run("DELETE FROM todos");
+
+            // Insert all current todos
+            this.todos.forEach(todo => {
+                const description = todo.description || "";
+                this.database.run("INSERT INTO todos (id, title, description, completed) VALUES (?, ?, ?, ?)", [todo.id, todo.title, description, todo.completed]);
+            });
+
+            // Commit transaction
+            this.database.run("COMMIT");
+
+            return { success: true, value: this.database };
+        } catch (error) {
+            // Rollback on error
+            this.database.run("ROLLBACK");
+            return { success: false, error: `Database save failed: ${error instanceof Error ? error.message : String(error)}` };
+        }
+    }
+
+    fromSqlite() : Result<TodoManager, string> {
+        try {
+            // Start transaction for consistency
+            this.database.run("BEGIN");
+
+            const todos: Todo[] = [];
+            const query = this.database.query("SELECT * FROM todos");
+            const result = query.all();
+
+            result.forEach((row: any) => {
+                todos.push({
+                    id: row.id,
+                    title: row.title,
+                    description: row.description || undefined,
+                    completed: !!row.completed,
+                });
+            });
+
+            // Commit transaction
+            this.database.run("COMMIT");
+
+            return { success: true, value: new TodoManager(todos) };
+        } catch (error) {
+            // Rollback on error
+            this.database.run("ROLLBACK");
+            return { success: false, error: `Database load failed: ${error instanceof Error ? error.message : String(error)}` };
+        }
+    }
+
+    /**
+     * Closes the database connection to free resources
+     */
+    closeDatabase(): Result<void, string> {
+        try {
+            this.database.close();
+            return { success: true, value: undefined };
+        } catch (error) {
+            return { success: false, error: `Failed to close database: ${error instanceof Error ? error.message : String(error)}` };
+        }
+    }
 }
 
 function handleTodoCreation(manager: TodoManager): Result<TodoManager, string> {
@@ -224,7 +296,7 @@ function handleCompleteTodo(manager: TodoManager): Result<TodoManager, string> {
     }
 }
 
-const allowedCommands = ["add", "view", "update", "complete", "remove", "help", "quit"];
+const allowedCommands = ["add", "view", "update", "complete", "remove", "help", "quit", "save", "load"];
 const helpText = `
 Available commands:
 - add: Add a new todo
@@ -232,6 +304,8 @@ Available commands:
 - update: Update an existing todo
 - complete: Mark a todo as complete
 - remove: Remove a todo
+- save: Save todos to the database
+- load: Load todos from the database
 - help: Show this help message
 - quit: Exit the application
 `;
@@ -283,6 +357,23 @@ function main() {
                     console.log("Error removing todo:", removeResult.error);
                 }
                 break;
+            case "save":
+                const saveResult = todoManager.toSqlite();
+                if (saveResult.success) {
+                    console.log("Todos saved successfully.");
+                } else {
+                    console.log("Error saving todos:", saveResult.error);
+                }
+                break;
+            case "load":
+                const loadResult = todoManager.fromSqlite();
+                if (loadResult.success) {
+                    todoManager = loadResult.value;
+                    console.log("Todos loaded successfully.");
+                } else {
+                    console.log("Error loading todos:", loadResult.error);
+                }
+                break;
             case "view":
                 if (todoManager.getTodos().length > 0) {
                     console.log("Current Todos:");
@@ -292,6 +383,13 @@ function main() {
                 }
                 break;
             case "quit":
+                // Clean up database connection before exiting
+                const closeResult = todoManager.closeDatabase();
+                if (!closeResult.success) {
+                    console.log("Warning: Error closing database:", closeResult.error);
+                } else {
+                    console.log("Database connection closed successfully.");
+                }
                 isRunning = false;
                 break;
             case "help":
