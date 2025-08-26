@@ -170,7 +170,15 @@ class TodoManager {
         return { success: true, value: new TodoManager(newTodos) };
     }
 
-    toSqlite() : Result<Database, string> {
+    /**
+     * The function `toSqlite` in TypeScript converts current todos to SQLite format and handles database
+     * transactions.
+     * @returns The `toSqlite()` method returns a `Result` object containing either a `Database` object on
+     * success or an error message string on failure. The success case includes a boolean flag `success`
+     * set to `true` and the database object as `value`. In case of an error, the `success` flag is set to
+     * `false` and the error message is included in the `error
+     */
+    toSqlite(): Result<Database, string> {
         try {
             // Start transaction for atomic operation
             this.database.run("BEGIN");
@@ -198,7 +206,14 @@ class TodoManager {
         }
     }
 
-    fromSqlite() : Result<TodoManager, string> {
+    /**
+     * The function `fromSqlite` retrieves todos from an SQLite database, handling transactions and error
+     * cases.
+     * @returns The `fromSqlite()` function returns a `Result` object containing either a `TodoManager`
+     * instance if the operation is successful, or a string error message if an error occurs during the
+     * database load process.
+     */
+    fromSqlite(): Result<TodoManager, string> {
         try {
             // Start transaction for consistency
             this.database.run("BEGIN");
