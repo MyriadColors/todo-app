@@ -347,7 +347,69 @@ Available commands:
 `;
 
 function confirmAction(message: string): boolean {
-    return readlineSync.keyInYNStrict(message);
+    return readlineSync.question(`${message} (y/n): `).toLowerCase() === 'y';
+}
+
+// a 'meta-handler' function to consolidate command handling operations
+function commandHandler(command: string, todoManager: TodoManager, dbManager: DatabaseManager): { todoManager: TodoManager; dbManager: DatabaseManager; continueRunning: boolean } {
+    switch (command) {
+        case "add":
+            const addResult = handleTodoCreation(todoManager);
+            if (addResult.success) {
+                todoManager = addResult.value;
+            }
+            break;
+        case "view":
+            console.log("Current Todos:");
+            console.log(todoManager.toStringLong());
+            break;
+        case "update":
+            const updateResult = handleTodoUpdate(todoManager);
+            if (updateResult.success) {
+                todoManager = updateResult.value;
+            }
+            break;
+        case "complete":
+            const completeResult = handleCompleteTodo(todoManager);
+            if (completeResult.success) {
+                todoManager = completeResult.value;
+            }
+            break;
+        case "remove":
+            if (confirmAction("Are you sure you want to remove a todo?")) {
+                const removeResult = handleTodoRemove(todoManager);
+                if (removeResult.success) {
+                    todoManager = removeResult.value;
+                    console.log("\nTodo removed successfully.");
+                }
+            }
+            break;
+        case "save":
+            if (confirmAction("This will overwrite the existing database. Continue?")) {
+                const saveResult = dbManager.toSqlite(todoManager);
+                if (saveResult.success) {
+                    console.log("\nTodos saved successfully.");
+                }
+            }
+            break;
+        case "load":
+            if (confirmAction("This will overwrite the current todos. Continue?")) {
+                const loadResult = dbManager.fromSqlite();
+                if (loadResult.success) {
+                    todoManager = loadResult.value;
+                    console.log("\nTodos loaded successfully.");
+                }
+            }
+            break;
+        case "help":
+            console.log(helpText);
+            break;
+        case "quit":
+            return { todoManager, dbManager, continueRunning: false };
+        default:
+            console.log("Unknown command.");
+    }
+    return { todoManager, dbManager, continueRunning: true };
 }
 
 function main() {
@@ -360,104 +422,15 @@ function main() {
 
     while (isRunning) {
         const action = readlineSync.question("Enter action: ");
-        if (!allowedCommands.includes(action)) {
-            console.log("Invalid command. Type 'help' for a list of commands.");
+        if (!allowedCommands.some(cmd => cmd.command === action || cmd.aliases.includes(action))) {
+            console.log("Invalid command. Type 'help' to see available commands.");
             continue;
         }
-        switch (action) {
-            case "add":
-                const result = handleTodoCreation(todoManager);
-                if (result.success) {
-                    todoManager = result.value;
-                } else {
-                    console.log("Error adding todo:", result.error);
-                }
-                break;
-            case "update":
-                // Show todos
-                if (todoManager.getTodos().length > 0) {
-                    console.log("Current Todos:");
-                    console.log(todoManager.toStringLong());
-                } else {
-                    console.log("No todos available.");
-                }
-                break;
-            case "complete":
-                if (todoManager.getTodos().length > 0) {
-                    const completeResult = handleCompleteTodo(todoManager);
-                    if (completeResult.success) {
-                        todoManager = completeResult.value;
-                    } else {
-                        console.log("Error completing todo:", completeResult.error);
-                    }
-                } else {
-                    console.log("No todos available.");
-                }
-                break;
-            case "remove":
-                if (!confirmAction("Are you sure you want to remove a todo?")) {
-                    console.log("Todo removal canceled.");
-                    continue;
-                }
-                if (todoManager.getTodos().length > 0) {
-                    const removeResult = handleTodoRemove(todoManager);
-                    if (removeResult.success) {
-                        todoManager = removeResult.value;
-                    } else {
-                        console.log("Error removing todo:", removeResult.error);
-                    }
-                } else {
-                    console.log("No todos available.");
-                }
-                break;
-            case "save":
-                if (!confirmAction("This will overwrite the existing database. Continue?")) {
-                    console.log("Todo saving canceled.");
-                    continue;
-                }
-                const saveResult = dbManager.toSqlite(todoManager);
-                if (saveResult.success) {
-                    console.log("Todos saved successfully.");
-                } else {
-                    console.log("Error saving todos:", saveResult.error);
-                }
-                break;
-            case "load":
-                if (!confirmAction("This will overwrite the current todos. Continue?")) {
-                    console.log("Todo loading canceled.");
-                    continue;
-                }
-                const loadResult = dbManager.fromSqlite();
-                if (loadResult.success) {
-                    todoManager = loadResult.value;
-                    console.log("Todos loaded successfully.");
-                } else {
-                    console.log("Error loading todos:", loadResult.error);
-                }
-                break;
-            case "view":
-                if (todoManager.getTodos().length > 0) {
-                    console.log("Current Todos:");
-                    console.log(todoManager.toStringLong());
-                } else {
-                    console.log("No todos available.");
-                }
-                break;
-            case "quit":
-                // Clean up database connection before exiting
-                const closeResult = dbManager.closeDatabase();
-                if (!closeResult.success) {
-                    console.log("Warning: Error closing database:", closeResult.error);
-                } else {
-                    console.log("Database connection closed successfully.");
-                }
-                isRunning = false;
-                break;
-            case "help":
-                console.log(helpText);
-                break;
-            default:
-                console.log("Unknown action. Please try again.");
+        const result = commandHandler(action, todoManager, dbManager);
+        if (result) {
+            todoManager = result.todoManager;
+            dbManager = result.dbManager;
+            isRunning = result.continueRunning;
         }
     }
 }
