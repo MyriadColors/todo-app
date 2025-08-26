@@ -21,7 +21,6 @@ class TodoManager {
     // outside. It should never be reassigned.
     private readonly todos: ReadonlyArray<Todo>;
     private nextId: number = 1;
-    private database: Database = new Database("todos.db");
 
     /**
      * The function `consolidateIds` takes an array of `Todo` objects and returns a new array with updated
@@ -170,16 +169,21 @@ class TodoManager {
         ];
         return { success: true, value: new TodoManager(newTodos) };
     }
+}
+
+class DatabaseManager {
+
+    private database: Database = new Database("todos.db");
 
     /**
-     * The function `toSqlite` in TypeScript converts current todos to SQLite format and handles database
-     * transactions.
-     * @returns The `toSqlite()` method returns a `Result` object containing either a `Database` object on
-     * success or an error message string on failure. The success case includes a boolean flag `success`
-     * set to `true` and the database object as `value`. In case of an error, the `success` flag is set to
-     * `false` and the error message is included in the `error
-     */
-    toSqlite(): Result<Database, string> {
+ * The function `toSqlite` in TypeScript converts current todos to SQLite format and handles database
+ * transactions.
+ * @returns The `toSqlite()` method returns a `Result` object containing either a `Database` object on
+ * success or an error message string on failure. The success case includes a boolean flag `success`
+ * set to `true` and the database object as `value`. In case of an error, the `success` flag is set to
+ * `false` and the error message is included in the `error
+ */
+    toSqlite(todoManager: TodoManager): Result<Database, string> {
         try {
             // Start transaction for atomic operation
             this.database.run("BEGIN");
@@ -187,13 +191,13 @@ class TodoManager {
             // Create table if it doesn't exist
             this.database.run("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY, title TEXT, description TEXT, completed BOOLEAN)");
 
-            // Clear existing data to prevent duplicates
-            this.database.run("DELETE FROM todos");
-
             // Insert all current todos
-            this.todos.forEach(todo => {
+            todoManager.getTodos().forEach(todo => {
                 const description = todo.description || "";
-                this.database.run("INSERT INTO todos (id, title, description, completed) VALUES (?, ?, ?, ?)", [todo.id, todo.title, description, todo.completed]);
+                this.database.run(
+                    "INSERT OR REPLACE INTO todos (id, title, description, completed) VALUES (?, ?, ?, ?)",
+                    [todo.id, todo.title, description, todo.completed]
+                );
             });
 
             // Commit transaction
@@ -329,6 +333,7 @@ Available commands:
 
 function main() {
     let todoManager = new TodoManager();
+    let dbManager = new DatabaseManager();
     let isRunning = true;
 
     console.log("Welcome to the Todo App!");
@@ -374,7 +379,7 @@ function main() {
                 }
                 break;
             case "save":
-                const saveResult = todoManager.toSqlite();
+                const saveResult = dbManager.toSqlite(todoManager);
                 if (saveResult.success) {
                     console.log("Todos saved successfully.");
                 } else {
@@ -382,7 +387,7 @@ function main() {
                 }
                 break;
             case "load":
-                const loadResult = todoManager.fromSqlite();
+                const loadResult = dbManager.fromSqlite();
                 if (loadResult.success) {
                     todoManager = loadResult.value;
                     console.log("Todos loaded successfully.");
@@ -400,7 +405,7 @@ function main() {
                 break;
             case "quit":
                 // Clean up database connection before exiting
-                const closeResult = todoManager.closeDatabase();
+                const closeResult = dbManager.closeDatabase();
                 if (!closeResult.success) {
                     console.log("Warning: Error closing database:", closeResult.error);
                 } else {
