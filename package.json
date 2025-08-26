@@ -10,7 +10,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@thundernetworkrad/readline-sync": "^2023.3.13-1",
     "@types/readline-sync": "^1.4.8",
     "readline-sync": "^1.4.10"
   }
