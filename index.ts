@@ -37,14 +37,6 @@ class TodoManager {
         return new TodoManager([...this.todos, newTodo], this.nextId + 1);
     }
 
-    // Helper method for the constructor to set the nextId, making internal
-    // updates cleaner
-    private withNextId(nextId: number): TodoManager {
-        const newManager = new TodoManager(this.todos);
-        newManager.nextId = nextId;
-        return newManager;
-    }
-
     getTodos(): ReadonlyArray<Todo> {
         // Return the existing immutable todos array.
         return this.todos;
