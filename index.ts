@@ -344,6 +344,12 @@ const allowedCommands: CommandSchema[] = [
     { command: "load", aliases: ["import", "get"] }
 ];
 
+const commandMap = new Map<string, string>();
+allowedCommands.forEach(cmd => {
+  commandMap.set(cmd.command, cmd.command);
+  cmd.aliases.forEach(alias => commandMap.set(alias, cmd.command));
+});
+
 const helpText = `
 Available commands:
 - add: Add a new todo
@@ -435,22 +441,50 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
     return { todoManager, dbManager, continueRunning: true };
 }
 
-function AppLoop(todoManager: TodoManager, dbManager: DatabaseManager) {
+/**
+ * Main application loop that handles user input and command execution
+ * @param todoManager - The todo manager instance
+ * @param dbManager - The database manager instance
+ */
+function AppLoop(todoManager: TodoManager, dbManager: DatabaseManager): void {
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
     let isRunning = true;
 
     while (isRunning) {
-        const action = readlineSync.question("Enter action: ");
-        if (!allowedCommands.some(cmd => cmd.command === action || cmd.aliases.includes(action))) {
-            console.error("Invalid command. Type 'help' to see available commands.");
+        // Display prompt and get user input
+        const action = readlineSync.question("\nEnter action: ").trim();
+        
+        // Skip empty input
+        if (!action) {
+            console.warn("Please enter a valid command.");
             continue;
         }
 
-        const result = commandHandler(action, todoManager, dbManager);
+        // Validate and get command
+        const command = commandMap.get(action);
+        if (!command) {
+            console.error(`Invalid command: "${action}". Type 'help' to see available commands.`);
+            continue;
+        }
+
+        // Execute command and handle result
+        const result = commandHandler(command, todoManager, dbManager);
+        
         if (result) {
             todoManager = result.todoManager;
             dbManager = result.dbManager;
             isRunning = result.continueRunning;
         }
+
+        retryCount = 0; // Reset retry counter on successful execution
+    }
+
+    // Cleanup resources when loop exits
+    console.log("\nShutting down application...");
+    const closeResult = dbManager.closeDatabase();
+    if (!closeResult.success) {
+        console.error(`Warning: ${closeResult.error}`);
     }
 }
 
