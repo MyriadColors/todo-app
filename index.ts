@@ -71,9 +71,20 @@ class TodoManager {
     }
 
     toStringLong() {
-        return this.todos.map(todo => {
-            return `ID: ${todo.id}\nTitle: ${todo.title}\nDescription: ${todo.description || "N/A"}\nCompleted: ${todo.completed ? "Yes" : "No"}`;
-        }).join("\n\n");
+        if (this.todos.length === 0) {
+            return "No todos found.";
+        }
+
+        return this.todos
+            .map((todo) => {
+                const description = todo.description || "N/A";
+                const completedStatus = todo.completed ? "Yes" : "No";
+                return `ID: ${todo.id}
+Title: ${todo.title}
+Description: ${description}
+Completed: ${completedStatus}`;
+            })
+            .join("\n\n");
     }
 
     getTodoById(id: number): Result<Todo, string> {
@@ -424,13 +435,8 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
     return { todoManager, dbManager, continueRunning: true };
 }
 
-function main() {
-    let todoManager = new TodoManager();
-    let dbManager = new DatabaseManager();
+function AppLoop(todoManager: TodoManager, dbManager: DatabaseManager) {
     let isRunning = true;
-
-    console.log("Welcome to the Todo App!");
-    console.log(helpText);
 
     while (isRunning) {
         const action = readlineSync.question("Enter action: ");
@@ -438,6 +444,7 @@ function main() {
             console.error("Invalid command. Type 'help' to see available commands.");
             continue;
         }
+
         const result = commandHandler(action, todoManager, dbManager);
         if (result) {
             todoManager = result.todoManager;
@@ -445,6 +452,13 @@ function main() {
             isRunning = result.continueRunning;
         }
     }
+}
+
+function main() {
+    let todoManager = new TodoManager();
+    let dbManager = new DatabaseManager();
+
+    AppLoop(todoManager, dbManager);
 }
 
 if (require.main === module) {
