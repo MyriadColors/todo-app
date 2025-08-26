@@ -357,6 +357,8 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
             const addResult = handleTodoCreation(todoManager);
             if (addResult.success) {
                 todoManager = addResult.value;
+            } else {
+                console.error(`Error adding todo: ${addResult.error}`);
             }
             break;
         case "view":
@@ -367,12 +369,16 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
             const updateResult = handleTodoUpdate(todoManager);
             if (updateResult.success) {
                 todoManager = updateResult.value;
+            } else {
+                console.error(`Error updating todo: ${updateResult.error}`);
             }
             break;
         case "complete":
             const completeResult = handleCompleteTodo(todoManager);
             if (completeResult.success) {
                 todoManager = completeResult.value;
+            } else {
+                console.error(`Error completing todo: ${completeResult.error}`);
             }
             break;
         case "remove":
@@ -381,6 +387,8 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
                 if (removeResult.success) {
                     todoManager = removeResult.value;
                     console.log("\nTodo removed successfully.");
+                } else {
+                    console.error(`Error removing todo: ${removeResult.error}`);
                 }
             }
             break;
@@ -389,6 +397,8 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
                 const saveResult = dbManager.toSqlite(todoManager);
                 if (saveResult.success) {
                     console.log("\nTodos saved successfully.");
+                } else {
+                    console.error(`Error saving todos: ${saveResult.error}`);
                 }
             }
             break;
@@ -398,6 +408,8 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
                 if (loadResult.success) {
                     todoManager = loadResult.value;
                     console.log("\nTodos loaded successfully.");
+                } else {
+                    console.error(`Error loading todos: ${loadResult.error}`);
                 }
             }
             break;
@@ -407,7 +419,7 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
         case "quit":
             return { todoManager, dbManager, continueRunning: false };
         default:
-            console.log("Unknown command.");
+            console.error("Unknown command.");
     }
     return { todoManager, dbManager, continueRunning: true };
 }
@@ -423,7 +435,7 @@ function main() {
     while (isRunning) {
         const action = readlineSync.question("Enter action: ");
         if (!allowedCommands.some(cmd => cmd.command === action || cmd.aliases.includes(action))) {
-            console.log("Invalid command. Type 'help' to see available commands.");
+            console.error("Invalid command. Type 'help' to see available commands.");
             continue;
         }
         const result = commandHandler(action, todoManager, dbManager);
