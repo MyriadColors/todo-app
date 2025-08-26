@@ -217,7 +217,11 @@ class DatabaseManager {
             return { success: true, value: this.database };
         } catch (error) {
             // Rollback on error
-            this.database.run("ROLLBACK");
+            try {
+                this.database.run("ROLLBACK");
+            } catch (rollbackError) {
+                return { success: false, error: `Rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}` };
+            }
             return { success: false, error: `Database save failed: ${error instanceof Error ? error.message : String(error)}` };
         }
     }
@@ -271,6 +275,16 @@ class DatabaseManager {
     }
 }
 
+function promptForTodoId(manager: TodoManager, action: string): number | null {
+    if (manager.getTodos().length === 0) {
+        console.log("No todos available.");
+        return null;
+    }
+    console.log(manager.toString());
+    const id = parseInt(readlineSync.question(`Enter todo ID to ${action}: `));
+    return isNaN(id) ? null : id;
+}
+
 function handleTodoCreation(manager: TodoManager): Result<TodoManager, string> {
     const title = readlineSync.question("Enter todo title: ");
     if (!title.trim()) {
@@ -279,12 +293,15 @@ function handleTodoCreation(manager: TodoManager): Result<TodoManager, string> {
     const description = readlineSync.question("Enter todo description (optional): ");
 
     const updatedManager = manager.addTodo(title, description || undefined);
-    console.log(`Added todo: ${title}`);
     return { success: true, value: updatedManager };
 }
 
 function handleTodoUpdate(manager: TodoManager): Result<TodoManager, string> {
-    const id = parseInt(readlineSync.question("Enter todo ID to update: "));
+    const id = promptForTodoId(manager, "update");
+    if (id === null) {
+        return { success: false, error: "No valid ID provided" };
+    }
+
     const title = readlineSync.question("Enter new todo title (leave blank to keep current): ");
     const description = readlineSync.question("Enter new todo description (leave blank to keep current): ");
 
@@ -297,34 +314,60 @@ function handleTodoUpdate(manager: TodoManager): Result<TodoManager, string> {
         description: description.trim() || undefined
     });
 
-    if (result.success) {
-        console.log(`Updated todo ID ${id}`);
-        return { success: true, value: result.value };
-    } else {
-        return { success: false, error: result.error };
-    }
+    return result;
 }
 
 function handleTodoRemove(manager: TodoManager): Result<TodoManager, string> {
-    const id = parseInt(readlineSync.question("Enter todo ID to remove: "));
-    const result = manager.removeTodo(id);
-    if (result.success) {
-        console.log(`Removed todo ID ${id}`);
-        return { success: true, value: result.value };
-    } else {
-        return { success: false, error: result.error };
+    const id = promptForTodoId(manager, "remove");
+    if (id === null) {
+        return { success: false, error: "No valid ID provided" };
     }
+
+    const result = manager.removeTodo(id);
+    return result;
 }
 
 function handleCompleteTodo(manager: TodoManager): Result<TodoManager, string> {
-    const id = parseInt(readlineSync.question("Enter todo ID to mark as complete: "));
-    const result = manager.markCompleted(id);
-    if (result.success) {
-        console.log(`Marked todo ID ${id} as complete`);
-        return { success: true, value: result.value };
-    } else {
-        return { success: false, error: result.error };
+    const id = promptForTodoId(manager, "complete");
+    if (id === null) {
+        return { success: false, error: "No valid ID provided" };
     }
+
+    const result = manager.markCompleted(id);
+    return result;
+}
+
+function handleExit(dbManager: DatabaseManager): Result<void, string> {
+    const closeResult = dbManager.closeDatabase();
+    if (!closeResult.success) {
+        console.error("Warning: Failed to close database:", closeResult.error);
+    }
+
+    return { success: true, value: undefined };
+}
+
+function handleView(manager: TodoManager): Result<TodoManager, string> {
+    console.log("Current Todos:");
+    console.log(manager.toStringLong());
+    return { success: true, value: manager };
+}
+
+function handleHelp(manager: TodoManager): Result<TodoManager, string> {
+    // Parse the input to check for specific command help
+    const parts = lastInput.trim().split(/\s+/);
+    if (parts.length > 1) {
+        // Specific command help: "help <command>"
+        const specificCommand = commandMap.get(parts[1]);
+        if (specificCommand) {
+            console.log(generateSpecificHelp(specificCommand));
+        } else {
+            console.log(`Unknown command: ${parts[1]}. Type 'help' to see all available commands.`);
+        }
+    } else {
+        // General help
+        console.log(generateGeneralHelp());
+    }
+    return { success: true, value: manager };
 }
 
 interface CommandSchema {
@@ -350,95 +393,259 @@ allowedCommands.forEach(cmd => {
   cmd.aliases.forEach(alias => commandMap.set(alias, cmd.command));
 });
 
-const helpText = `
-Available commands:
-- add: Add a new todo
-- view: View all todos
-- update: Update an existing todo
-- complete: Mark a todo as complete
-- remove: Remove a todo
-- save: Save todos to the database
-- load: Load todos from the database
-- help: Show this help message
-- quit: Exit the application
-`;
+// Dynamic help generation functions
+function generateGeneralHelp(): string {
+    let helpText = `\nAvailable commands:\n`;
+
+    // Group commands by category for better organization
+    const managementCommands = ['add', 'view', 'update', 'complete', 'remove'];
+    const databaseCommands = ['save', 'load'];
+    const utilityCommands = ['help', 'quit'];
+
+    // Add management commands
+    helpText += `\n📝 Todo Management:\n`;
+    managementCommands.forEach(cmd => {
+        const config = commandRegistry[cmd];
+        const aliases = allowedCommands.find(c => c.command === cmd)?.aliases || [];
+        const aliasText = aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+        helpText += `  ${cmd}${aliasText.padEnd(12)} - ${config.description}\n`;
+    });
+
+    // Add database commands
+    helpText += `\n💾 Database Operations:\n`;
+    databaseCommands.forEach(cmd => {
+        const config = commandRegistry[cmd];
+        const aliases = allowedCommands.find(c => c.command === cmd)?.aliases || [];
+        const aliasText = aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+        helpText += `  ${cmd}${aliasText.padEnd(12)} - ${config.description}\n`;
+    });
+
+    // Add utility commands
+    helpText += `\n🔧 Utilities:\n`;
+    utilityCommands.forEach(cmd => {
+        const config = commandRegistry[cmd];
+        const aliases = allowedCommands.find(c => c.command === cmd)?.aliases || [];
+        const aliasText = aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+        helpText += `  ${cmd}${aliasText.padEnd(12)} - ${config.description}\n`;
+    });
+
+    helpText += `\nType 'help <command>' for detailed information about a specific command.\n`;
+    return helpText;
+}
+
+function generateSpecificHelp(command: string): string {
+    const config = commandRegistry[command];
+    if (!config) {
+        return `Unknown command: ${command}. Type 'help' to see all available commands.`;
+    }
+
+    const aliases = allowedCommands.find(c => c.command === command)?.aliases || [];
+    const aliasText = aliases.length > 0 ? ` (aliases: ${aliases.join(', ')})` : '';
+
+    let helpText = `\nCommand: ${command}${aliasText}\n`;
+    helpText += `Description: ${config.description}\n`;
+    helpText += `Usage: ${config.usage}\n`;
+
+    if (config.requiresConfirmation) {
+        helpText += `Note: This command requires confirmation before execution.\n`;
+    }
+
+    return helpText;
+}
 
 function confirmAction(message: string): boolean {
     return readlineSync.question(`${message} (y/n): `).toLowerCase() === 'y';
 }
 
-// a 'meta-handler' function to consolidate command handling operations
-function commandHandler(command: string, todoManager: TodoManager, dbManager: DatabaseManager): { todoManager: TodoManager; dbManager: DatabaseManager; continueRunning: boolean } {
-    switch (command) {
-        case "add":
-            const addResult = handleTodoCreation(todoManager);
-            if (addResult.success) {
-                todoManager = addResult.value;
-            } else {
-                console.error(`Error adding todo: ${addResult.error}`);
-            }
-            break;
-        case "view":
-            console.log("Current Todos:");
-            console.log(todoManager.toStringLong());
-            break;
-        case "update":
-            const updateResult = handleTodoUpdate(todoManager);
-            if (updateResult.success) {
-                todoManager = updateResult.value;
-            } else {
-                console.error(`Error updating todo: ${updateResult.error}`);
-            }
-            break;
-        case "complete":
-            const completeResult = handleCompleteTodo(todoManager);
-            if (completeResult.success) {
-                todoManager = completeResult.value;
-            } else {
-                console.error(`Error completing todo: ${completeResult.error}`);
-            }
-            break;
-        case "remove":
-            if (confirmAction("Are you sure you want to remove a todo?")) {
-                const removeResult = handleTodoRemove(todoManager);
-                if (removeResult.success) {
-                    todoManager = removeResult.value;
-                    console.log("\nTodo removed successfully.");
-                } else {
-                    console.error(`Error removing todo: ${removeResult.error}`);
-                }
-            }
-            break;
-        case "save":
-            if (confirmAction("This will overwrite the existing database. Continue?")) {
-                const saveResult = dbManager.toSqlite(todoManager);
-                if (saveResult.success) {
-                    console.log("\nTodos saved successfully.");
-                } else {
-                    console.error(`Error saving todos: ${saveResult.error}`);
-                }
-            }
-            break;
-        case "load":
-            if (confirmAction("This will overwrite the current todos. Continue?")) {
-                const loadResult = dbManager.fromSqlite();
-                if (loadResult.success) {
-                    todoManager = loadResult.value;
-                    console.log("\nTodos loaded successfully.");
-                } else {
-                    console.error(`Error loading todos: ${loadResult.error}`);
-                }
-            }
-            break;
-        case "help":
-            console.log(helpText);
-            break;
-        case "quit":
-            return { todoManager, dbManager, continueRunning: false };
-        default:
-            console.error("Unknown command.");
+// Define command handler types
+type CommandHandler<T> = (manager: T) => Result<T, string>;
+type DatabaseCommandHandler = (dbManager: DatabaseManager, todoManager: TodoManager) => Result<TodoManager | Database, string>;
+type ExitCommandHandler = (dbManager: DatabaseManager) => Result<void, string>;
+
+// Command configuration interface
+interface CommandConfig {
+    handler: CommandHandler<TodoManager> | DatabaseCommandHandler | ExitCommandHandler | null;
+    requiresConfirmation: boolean;
+    confirmationMessage?: string;
+    modifiesState: boolean;
+    successMessage?: string;
+    isQuitCommand?: boolean;
+    isDatabaseCommand?: boolean;
+    description: string;
+    usage?: string;
+}
+
+// Command registry
+const commandRegistry: Record<string, CommandConfig> = {
+    add: {
+        handler: handleTodoCreation,
+        requiresConfirmation: false,
+        modifiesState: true,
+        description: "Add a new todo item",
+        usage: "add",
+    },
+    view: {
+        handler: handleView,
+        requiresConfirmation: false,
+        modifiesState: false,
+        description: "Display all todos with details",
+        usage: "view",
+    },
+    update: {
+        handler: handleTodoUpdate,
+        requiresConfirmation: false,
+        modifiesState: true,
+        description: "Update an existing todo's title and/or description",
+        usage: "update",
+    },
+    complete: {
+        handler: handleCompleteTodo,
+        requiresConfirmation: false,
+        modifiesState: true,
+        description: "Mark a todo as completed",
+        usage: "complete",
+    },
+    remove: {
+        handler: handleTodoRemove,
+        requiresConfirmation: true,
+        confirmationMessage: "Are you sure you want to remove a todo?",
+        modifiesState: true,
+        successMessage: "\nTodo removed successfully.",
+        description: "Remove a todo item (requires confirmation)",
+        usage: "remove",
+    },
+    save: {
+        handler: (dbManager: DatabaseManager, todoManager: TodoManager) => dbManager.toSqlite(todoManager),
+        requiresConfirmation: true,
+        confirmationMessage: "This will overwrite the existing database. Continue?",
+        modifiesState: false,
+        successMessage: "\nTodos saved successfully.",
+        isDatabaseCommand: true,
+        description: "Save current todos to database (requires confirmation)",
+        usage: "save",
+    },
+    load: {
+        handler: (dbManager: DatabaseManager, todoManager: TodoManager) => dbManager.fromSqlite(),
+        requiresConfirmation: true,
+        confirmationMessage: "This will overwrite the current todos. Continue?",
+        modifiesState: true,
+        successMessage: "\nTodos loaded successfully.",
+        isDatabaseCommand: true,
+        description: "Load todos from database (requires confirmation)",
+        usage: "load",
+    },
+    help: {
+        handler: handleHelp,
+        requiresConfirmation: false,
+        modifiesState: false,
+        description: "Show help information",
+        usage: "help [command]",
+    },
+    quit: {
+        handler: (dbManager: DatabaseManager) => handleExit(dbManager),
+        requiresConfirmation: false,
+        modifiesState: false,
+        isQuitCommand: true,
+        description: "Exit the application",
+        usage: "quit",
+    },
+};
+
+// Global variable to store the last input for help command parsing
+let lastInput = "";
+
+// Error classification for retry logic
+enum ErrorType {
+    USER_ERROR,
+    SYSTEM_ERROR
+}
+
+function classifyError(error: string): ErrorType {
+    // User errors - these should not count toward retries
+    const userErrorPatterns = [
+        "Unknown command",
+        "Invalid command",
+        "Please enter a valid command",
+        "No valid ID provided",
+        "Todo not found",
+        "Todo already completed",
+        "Title cannot be empty",
+        "No changes made",
+        "No todos available"
+    ];
+
+    // Check if the error message matches any user error pattern
+    return userErrorPatterns.some(pattern => error.includes(pattern))
+        ? ErrorType.USER_ERROR
+        : ErrorType.SYSTEM_ERROR;
+}
+
+// Generic command executor that handles all the common logic
+function executeCommand(
+    command: string,
+    config: CommandConfig,
+    todoManager: TodoManager,
+    dbManager: DatabaseManager
+): Result<{ todoManager: TodoManager; dbManager: DatabaseManager; continueRunning: boolean }, string> {
+
+    // Handle quit command specially due to different return type
+    if (config.isQuitCommand) {
+        return { success: true, value: { todoManager, dbManager, continueRunning: false } };
     }
-    return { todoManager, dbManager, continueRunning: true };
+
+    // Check confirmation if required
+    if (config.requiresConfirmation && config.confirmationMessage) {
+        if (!confirmAction(config.confirmationMessage)) {
+            return { success: true, value: { todoManager, dbManager, continueRunning: true } };
+        }
+    }
+
+    // Execute the handler if it exists
+    if (config.handler) {
+        let result: Result<any, string>;
+
+        if (config.isDatabaseCommand) {
+            // Database commands take both managers
+            result = (config.handler as DatabaseCommandHandler)(dbManager, todoManager);
+        } else {
+            // Regular commands take only todoManager
+            result = (config.handler as CommandHandler<TodoManager>)(todoManager);
+        }
+
+        if (result.success) {
+            // Update state if the command modifies it
+            if (config.modifiesState) {
+                if (config.isDatabaseCommand && result.value instanceof TodoManager) {
+                    todoManager = result.value;
+                } else if (!config.isDatabaseCommand && result.value instanceof TodoManager) {
+                    todoManager = result.value;
+                }
+            }
+
+            // Log success message if provided
+            if (config.successMessage) {
+                console.log(config.successMessage);
+            }
+
+            return { success: true, value: { todoManager, dbManager, continueRunning: true } };
+        } else {
+            // Return error result to be handled by commandHandler
+            return { success: false, error: (result as { success: false; error: string }).error };
+        }
+    }
+
+    return { success: true, value: { todoManager, dbManager, continueRunning: true } };
+}
+
+// Simplified command handler that uses the generic executor
+function commandHandler(command: string, todoManager: TodoManager, dbManager: DatabaseManager): Result<{ todoManager: TodoManager; dbManager: DatabaseManager; continueRunning: boolean }, string> {
+    const config = commandRegistry[command];
+
+    if (!config) {
+        return { success: false, error: "Unknown command" };
+    }
+
+    return executeCommand(command, config, todoManager, dbManager);
 }
 
 /**
@@ -446,15 +653,18 @@ function commandHandler(command: string, todoManager: TodoManager, dbManager: Da
  * @param todoManager - The todo manager instance
  * @param dbManager - The database manager instance
  */
-function AppLoop(todoManager: TodoManager, dbManager: DatabaseManager): void {
+function RunApp(todoManager: TodoManager, dbManager: DatabaseManager): void {
     const MAX_RETRIES = 3;
     let retryCount = 0;
     let isRunning = true;
 
     while (isRunning) {
         // Display prompt and get user input
-        const action = readlineSync.question("\nEnter action: ").trim();
-        
+        const action = readlineSync.question("Enter action: ").trim();
+
+        // Store the input for help command parsing
+        lastInput = action;
+
         // Skip empty input
         if (!action) {
             console.warn("Please enter a valid command.");
@@ -470,29 +680,52 @@ function AppLoop(todoManager: TodoManager, dbManager: DatabaseManager): void {
 
         // Execute command and handle result
         const result = commandHandler(command, todoManager, dbManager);
-        
-        if (result) {
-            todoManager = result.todoManager;
-            dbManager = result.dbManager;
-            isRunning = result.continueRunning;
-        }
 
-        retryCount = 0; // Reset retry counter on successful execution
+        if (result.success) {
+            const { todoManager: newTodoManager, dbManager: newDbManager, continueRunning } = result.value;
+            todoManager = newTodoManager;
+            dbManager = newDbManager;
+            isRunning = continueRunning;
+            retryCount = 0; // Reset retry counter on successful execution
+        } else {
+            // Handle command execution error
+            const errorMessage = (result as { success: false; error: string }).error;
+            const errorType = classifyError(errorMessage);
+
+            if (errorType === ErrorType.USER_ERROR) {
+                // For user errors, just display the error and continue without retry logic
+                console.error(`Input error: ${errorMessage}`);
+                console.log("Please correct your input and try again.");
+                // Don't increment retry count for user errors
+            } else {
+                // For system errors, use retry logic
+                console.error(`System error: ${errorMessage}`);
+                retryCount++;
+
+                if (retryCount > MAX_RETRIES) {
+                    console.error(`Maximum retry attempts (${MAX_RETRIES}) exceeded. Exiting application.`);
+                    isRunning = false;
+                } else {
+                    console.warn(`System error detected. Retry attempt ${retryCount}/${MAX_RETRIES}. Please try again.`);
+                }
+            }
+        }
     }
 
     // Cleanup resources when loop exits
     console.log("\nShutting down application...");
     const closeResult = dbManager.closeDatabase();
     if (!closeResult.success) {
-        console.error(`Warning: ${closeResult.error}`);
+        console.error(`Warning: ${(closeResult as { success: false; error: string }).error}`);
     }
 }
 
 function main() {
     let todoManager = new TodoManager();
     let dbManager = new DatabaseManager();
+    console.log("\nAvailable commands: add, view, update, complete, remove, save, load, help, quit");
 
-    AppLoop(todoManager, dbManager);
+    RunApp(todoManager, dbManager);
 }
 
 if (require.main === module) {
