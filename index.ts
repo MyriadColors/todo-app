@@ -35,8 +35,9 @@ class TodoManager {
     }
 
     // Use a constructor to initialize the state.
-    constructor(todos: ReadonlyArray<Todo> = [], nextId?: number) {
+    constructor(todos: ReadonlyArray<Todo> = [], nextId: number = 1) {
         this.todos = TodoManager.consolidateIds(todos);
+        this.nextId = nextId;
     }
 
     /**
