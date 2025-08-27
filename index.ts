@@ -1,19 +1,6 @@
 var readlineSync = require("readline-sync")
 import { Database } from "bun:sqlite";
-
-
-// A simple immutable Todo list manager in TypeScript
-
-// Utility types for better type safety
-type Optional<T> = T | undefined;
-type Result<T, E> = { success: true; value: T } | { success: false; error: E };
-
-interface Todo {
-    id: number;
-    title: string;
-    description: Optional<string>;
-    completed: boolean;
-}
+import type { Result, Todo } from "./src/Types";
 
 // Immutable TodoManager class
 class TodoManager {
@@ -389,8 +376,8 @@ const allowedCommands: CommandSchema[] = [
 
 const commandMap = new Map<string, string>();
 allowedCommands.forEach(cmd => {
-  commandMap.set(cmd.command, cmd.command);
-  cmd.aliases.forEach(alias => commandMap.set(alias, cmd.command));
+    commandMap.set(cmd.command, cmd.command);
+    cmd.aliases.forEach(alias => commandMap.set(alias, cmd.command));
 });
 
 // Dynamic help generation functions
